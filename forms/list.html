@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>View data.json</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
+    body{margin:0;padding:24px;background:#f7f9fb;color:#111}
+    .wrap{max-width:920px;margin:0 auto}
+    h1{font-size:20px;margin:0 0 12px}
+    .meta{color:#555;font-size:13px;margin-bottom:18px}
+    .error{background:#ffecec;border:1px solid #f5c6cb;padding:12px;border-radius:6px;color:#7a1b1b}
+  .table-wrapper{background:transparent;border-radius:8px;overflow:auto}
+  table.data-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e3e8ee}
+  table.data-table thead th{padding:10px 12px;background:#f1f5f9;color:#12293a;font-weight:700;font-size:13px;text-align:left;position:sticky;top:0}
+  table.data-table tbody td{padding:10px 12px;border-top:1px solid #eef2f6;color:#0f1724;font-size:13px;vertical-align:top}
+  table.data-table tbody tr:nth-child(even){background:#fbfdff}
+  .controls-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .controls-row .small{margin-left:6px}
+    .small{font-size:12px;color:#667}
+    a.button{display:inline-block;margin-top:10px;padding:6px 10px;background:#0b5fff;color:#fff;border-radius:6px;text-decoration:none}
+    pre{white-space:pre-wrap;background:#0f1724;color:#dbeafe;padding:10px;border-radius:6px;overflow:auto}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app">
+   
+    <div id="controls" class="controls-row">
+      <a class="button" id="rawLink" href="data.json" target="_blank">Open raw data.json</a>
+      <a class="button" id="exportCsv" href="#">Export CSV</a>
+      <div class="small">Total: <span id="totalCount">0</span></div>
+    </div>
+
+    <div id="listContainer" style="margin-top:12px"></div>
+
+ 
+  </div>
+
+  <script>
+    function formatValue(v){
+      if (v === null) return '<em>null</em>';
+      if (v === undefined) return '<em>undefined</em>';
+      if (typeof v === 'string') return v.replace(/\r?\n/g,'<br>');
+      return String(v);
+    }
+
+    function renderList(data){
+      const container = document.getElementById('listContainer');
+      if (!Array.isArray(data)){
+        container.innerHTML = '<div class="error">JSON root is not an array.</div>';
+        return;
+      }
+      if (data.length === 0){
+        container.innerHTML = '<div class="small">No records found in data.json.</div>';
+        document.getElementById('totalCount').textContent = '0';
+        return;
+      }
+
+      // Determine all columns (unique keys across objects) in insertion order
+      const columns = [];
+      data.forEach(obj => {
+        Object.keys(obj).forEach(k => {
+          if (!columns.includes(k)) columns.push(k);
+        });
+      });
+
+      // Build table
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-wrapper';
+      const table = document.createElement('table');
+      table.className = 'data-table';
+
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      // leading index column
+      const thIndex = document.createElement('th'); thIndex.textContent = '#'; headRow.appendChild(thIndex);
+      columns.forEach(col => { const th = document.createElement('th'); th.textContent = col; headRow.appendChild(th); });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      data.forEach((obj, i) => {
+        const tr = document.createElement('tr');
+        const tdIndex = document.createElement('td'); tdIndex.textContent = (i+1); tr.appendChild(tdIndex);
+        columns.forEach(col => {
+          const td = document.createElement('td');
+          if (obj.hasOwnProperty(col)) td.innerHTML = formatValue(obj[col]);
+          else td.innerHTML = '<span class="small">—</span>';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+
+      container.innerHTML = '';
+      container.appendChild(wrapper);
+      document.getElementById('totalCount').textContent = String(data.length);
+
+      // wire CSV export
+      const exportBtn = document.getElementById('exportCsv');
+      exportBtn.onclick = (e) => { e.preventDefault(); downloadCSV(data, columns); };
+    }
+
+    function downloadCSV(data, columns){
+      // build rows
+      const rows = [];
+      rows.push(['#', ...columns]);
+      data.forEach((obj, i) => {
+        const row = [String(i+1)];
+        columns.forEach(col => {
+          let v = obj.hasOwnProperty(col) ? obj[col] : '';
+          if (v === null) v = '';
+          if (typeof v === 'string') {
+            // escape quotes
+            v = v.replace(/"/g,'""');
+          } else if (typeof v === 'object') {
+            v = JSON.stringify(v);
+          }
+          row.push(v);
+        });
+        rows.push(row);
+      });
+
+      const csv = rows.map(r => r.map(cell => '"' + String(cell).replace(/"/g,'""') + '"').join(',')).join('\r\n');
+      const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'data.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    // small helper to avoid inserting raw HTML into title
+    function escapeHtml(s){
+      return String(s)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+
+    async function loadData(){
+      try{
+        const resp = await fetch('data.json', {cache: 'no-store'});
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        renderList(data);
+      }catch(err){
+        const container = document.getElementById('app');
+        const msg = document.createElement('div');
+        msg.className = 'error';
+        msg.innerHTML = 'Could not load <code>data.json</code>. ' + escapeHtml(err.message) + ' <br>Make sure you are serving this folder with an HTTP server.';
+        container.insertBefore(msg, document.getElementById('controls'));
+        console.error(err);
+      }
+    }
+
+    // run on load
+    loadData();
+  </script>
+</body>
+</html>
